@@ -1,0 +1,8 @@
+# Network captures contain credentials and session tokens
+*.har
+# Local add-on options may contain the Sporteurope password
+options.json
+.env
+__pycache__/
+.venv/
+.pytest_cache/
