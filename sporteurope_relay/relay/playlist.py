@@ -1,4 +1,5 @@
 """Minimal HLS parsing for Mux master/media playlists."""
+import math
 import re
 from dataclasses import dataclass
 from urllib.parse import urljoin
@@ -88,3 +89,24 @@ def has_drm(text: str) -> bool:
             if attrs.get("METHOD", "NONE") != "NONE" or "KEYFORMAT" in attrs:
                 return True
     return False
+
+
+def render_media(segments, target_duration: int, ended: bool = False) -> str:
+    """Relay playlist; `segments` are BufferedSegment-like (seq, duration, discontinuity, disc_seq)."""
+    target = max([target_duration] + [math.ceil(s.duration) for s in segments])
+    first = segments[0] if segments else None
+    lines = [
+        "#EXTM3U",
+        "#EXT-X-VERSION:3",
+        f"#EXT-X-TARGETDURATION:{target}",
+        f"#EXT-X-MEDIA-SEQUENCE:{first.seq if first else 0}",
+        f"#EXT-X-DISCONTINUITY-SEQUENCE:{first.disc_seq if first else 0}",
+    ]
+    for segment in segments:
+        if segment.discontinuity and segment is not first:
+            lines.append("#EXT-X-DISCONTINUITY")
+        lines.append(f"#EXTINF:{segment.duration:.3f},")
+        lines.append(f"seg/{segment.seq}.ts")
+    if ended:
+        lines.append("#EXT-X-ENDLIST")
+    return "\n".join(lines) + "\n"
