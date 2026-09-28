@@ -1,0 +1,19 @@
+:root { --bg: #0d1117; --tile: #1c2430; --text: #f0f3f6; --muted: #9aa6b2; --accent: #f5b301; --live: #ff5a5f; }
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--text); font: 28px/1.3 system-ui, -apple-system, "Segoe UI", sans-serif; }
+[hidden] { display: none !important; }
+main { padding: 48px 64px; }
+h1 { margin: 0 0 16px; font-size: 52px; }
+#message { min-height: 1.3em; color: var(--accent); margin: 0 0 24px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(560px, 1fr)); gap: 24px; }
+.tile { display: block; width: 100%; text-align: left; padding: 28px 32px; border: 4px solid transparent; border-radius: 16px;
+        background: var(--tile); color: inherit; font: inherit; cursor: pointer; transition: transform .1s; }
+.tile:focus { outline: none; border-color: var(--accent); transform: scale(1.03); }
+.tile .teams { font-size: 34px; font-weight: 700; }
+.tile .when { color: var(--muted); margin-top: 8px; }
+.tile.live .when { color: var(--live); font-weight: 700; }
+.tile.locked { opacity: .55; }
+.hint { color: var(--muted); font-size: 22px; margin-top: 40px; }
+#player { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: #000; }
+#player video { width: 100%; height: 100%; }
+#player-message { position: absolute; left: 48px; bottom: 32px; color: var(--accent); margin: 0; }

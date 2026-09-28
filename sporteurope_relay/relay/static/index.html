@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Huskies live</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<main id="home">
+  <h1>Huskies live</h1>
+  <p id="message" role="status"></p>
+  <div id="games" class="grid"></div>
+  <p class="hint">VLC / Fire TV: <span id="vlc-url"></span></p>
+</main>
+<section id="player" hidden>
+  <video id="video" autoplay playsinline></video>
+  <p id="player-message" role="status"></p>
+</section>
+<script src="/static/hls.min.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>
