@@ -56,12 +56,16 @@ All calls go to `https://api.sporteurope.tv`, with headers `Origin` and
 Streams are Mux HLS: `stream.mux.com/{playbackId}.m3u8?token=…` → master
 playlist → `rendition.m3u8` on `manifest-*.mux.com` → segments.
 
-In the captured (free) stream `tokens.drm` was `null` and the rendition
-playlist contained no `#EXT-X-KEY` tags, i.e. unencrypted HLS.
+**DRM check (verified 2026-09-28):** two captures, a free livestream and the
+paid replay "EHC Freiburg vs. EC Kassel Huskies" (unlocked via the account's
+subscription, `analytics.used_monetization: "subscription"`). In both,
+`tokens.drm` was `null`, playlists had no `#EXT-X-KEY` tags and no license
+server was contacted, i.e. unencrypted HLS. Neither capture showed a dedicated
+session/heartbeat endpoint.
 
-**Unverified:** the capture was a free livestream. A paid Kassel game may carry
-a non-null `tokens.drm`, or enforce the one-stream limit through a mechanism
-not seen here. This is verified before building the relay (see Testing).
+**Still unverified:** a paid *live* Kassel game. It is expected to behave the
+same, but how the one-stream limit is enforced remains unknown. Covered by the
+Friday live test; the DRM guard stays in place regardless.
 
 ### Team filter
 
