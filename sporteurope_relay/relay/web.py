@@ -51,8 +51,7 @@ def create_app(client, relay, static_dir: Path = STATIC_DIR) -> web.Application:
         game = next((g for g in items if g.id == game_id), None)
         if game is None:
             return _error("unknown_game")
-        if game.unlocked is False:
-            return _error("not_purchased")
+        # A cached "not purchased" may be stale (bought on the website since); stream info decides.
         if not game.live:
             return _error("not_live")
         if relay.game is not None and relay.game.id == game.id and relay.state in ("starting", "live"):

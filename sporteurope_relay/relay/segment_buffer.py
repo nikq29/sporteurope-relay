@@ -41,6 +41,10 @@ class SegmentBuffer:
     def window(self, count: int) -> list[BufferedSegment]:
         return list(self._segments.values())[-count:]
 
+    def mark_discontinuity(self) -> None:
+        """Keep what is buffered; the next segment starts a discontinuity."""
+        self._pending_discontinuity = self._next_seq > 0
+
     def reset(self) -> None:
         """Drop everything; the next segment starts a discontinuity, numbering continues."""
         self._segments.clear()

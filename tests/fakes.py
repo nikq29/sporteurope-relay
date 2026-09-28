@@ -1,4 +1,5 @@
 """In-process fake of api.sporteurope.tv and Mux, shared by client, relay and integration tests."""
+import asyncio
 from collections import Counter
 
 from aiohttp import web
@@ -36,6 +37,10 @@ class FakeSporteurope:
         self.session_expired = False
         self.stream_status = 200
         self.rendition_status = 200
+        self.rendition_body = None
+        self.list_status = 200
+        self.detail_status: dict[str, int] = {}
+        self.list_delay = 0.0
         self.drm_token = None
         self.rendition_key = ""
         self.mux_forbidden = 0
@@ -86,6 +91,10 @@ class FakeSporteurope:
 
     async def _list(self, request):
         self.calls["list"] += 1
+        if self.list_delay:
+            await asyncio.sleep(self.list_delay)
+        if self.list_status != 200:
+            return web.json_response({}, status=self.list_status)
         page = int(request.query.get("page", "1"))
         per_page = int(request.query.get("per_page", "20"))
         items = list(self.assets.values())
@@ -100,6 +109,8 @@ class FakeSporteurope:
         item = next((a for a in self.assets.values() if a["slug"] == request.match_info["slug"]), None)
         if item is None:
             raise web.HTTPNotFound()
+        if item["id"] in self.detail_status:
+            return web.json_response({}, status=self.detail_status[item["id"]])
         products = [{"id": p, "name": "Pass", "price_in_cents": 3490, "disabled": False}
                     for p in self.products.get(item["id"], [])]
         return web.json_response({**item, "products": products})
@@ -142,6 +153,8 @@ class FakeSporteurope:
             return web.Response(status=403)
         if self.rendition_status != 200:
             return web.Response(status=self.rendition_status)
+        if self.rendition_body is not None:
+            return web.Response(text=self.rendition_body)
         height = request.match_info["height"]
         lines = ["#EXTM3U", "#EXT-X-VERSION:3", "#EXT-X-TARGETDURATION:1", f"#EXT-X-MEDIA-SEQUENCE:{self.media_seq}"]
         if self.rendition_key:

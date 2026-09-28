@@ -53,6 +53,7 @@ class StreamInfo:
 
 class SporteuropeClient:
     GAMES_TTL = 60.0
+    FAILURE_TTL = 15.0
     PER_PAGE = 50
     MAX_PAGES = 10
 
@@ -67,6 +68,8 @@ class SporteuropeClient:
         self._login_error: LoginFailed | None = None
         self._login_lock = asyncio.Lock()
         self._games: tuple[float, list[Game]] | None = None
+        self._games_lock = asyncio.Lock()
+        self._games_failure: tuple[float, UpstreamError] | None = None
         self._unlocked: dict[str, bool] = {}
         self.owned_ids: set[str] = set()
         self.login_body: dict = {}
@@ -137,9 +140,25 @@ class SporteuropeClient:
         return await self._request("GET", path, headers=headers)
 
     async def list_games(self) -> list[Game]:
-        now = time.monotonic()
-        if self._games and now - self._games[0] < self.GAMES_TTL:
-            return self._games[1]
+        async with self._games_lock:  # many TVs, one upstream fetch
+            now = time.monotonic()
+            if self._games and now - self._games[0] < self.GAMES_TTL:
+                return self._games[1]
+            if self._games_failure and now - self._games_failure[0] < self.FAILURE_TTL:
+                raise self._games_failure[1]
+            try:
+                games = await self._fetch_games()
+            except UpstreamError as exc:
+                if self._games:
+                    log.warning("Game list refresh failed (%s), serving the last good list", exc)
+                    self._games = (now, self._games[1])
+                    return self._games[1]
+                self._games_failure = (now, exc)
+                raise
+            self._games, self._games_failure = (now, games), None
+            return games
+
+    async def _fetch_games(self) -> list[Game]:
         if not self._logged_in:
             await self.login()
         items: list[dict] = []
@@ -149,17 +168,19 @@ class SporteuropeClient:
             items += body.get("data") or []
             if page >= int((body.get("meta") or {}).get("last_page", page)):
                 break
-        games = [await self._with_unlock(game) for game in parse_games(items, self._team_slug)]
-        self._games = (now, games)
-        return games
+        return [await self._with_unlock(game) for game in parse_games(items, self._team_slug)]
 
     async def _with_unlock(self, game: Game) -> Game:
         if game.id not in self._unlocked:
             if game.free or game.id.lower() in self.owned_ids:
                 self._unlocked[game.id] = True
             else:
-                detail = await self._request("GET", f"/api/web/public/assets/{game.profile_slug}/{game.slug}",
-                                             params={"lang": "de"})
+                try:
+                    detail = await self._request("GET", f"/api/web/public/assets/{game.profile_slug}/{game.slug}",
+                                                 params={"lang": "de"})
+                except UpstreamError as exc:
+                    log.warning("Unlock status unknown for %s (%s)", game.name, exc)
+                    return replace(game, unlocked=None)
                 self._unlocked[game.id] = is_unlocked(detail, self.owned_ids)
         return replace(game, unlocked=self._unlocked[game.id])
 

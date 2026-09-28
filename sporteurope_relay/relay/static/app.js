@@ -16,6 +16,9 @@
   var hls = null;
   var games = [];
   var armedId = null;
+  var armedRetries = 0;
+  var ARMED_MAX_RETRIES = 10; // with the 30 s poll: keep trying for ~5 min after start
+  var RETRYABLE = ["upstream", "not_live", "not_purchased"]; // never retry drm / stream_in_use / login_failed
   var playingGameId = null;
   var statusTimer = null;
 
@@ -85,16 +88,16 @@
         var armed = games.filter(function (g) { return g.id === armedId; })[0];
         if (armed && armed.live) {
           armedId = null;
-          play(armed.id);
+          play(armed.id, true);
         }
       }
     }).catch(function () { message.textContent = "Relay nicht erreichbar"; });
   }
 
   function select(game) {
-    if (game.unlocked === false) { message.textContent = "🔒 Nicht gekauft"; return; }
     if (!game.live) {
       armedId = game.id;
+      armedRetries = 0;
       message.textContent = "Startet automatisch, sobald das Spiel live ist.";
       render();
       return;
@@ -102,10 +105,19 @@
     play(game.id);
   }
 
-  function play(id) {
+  function play(id, fromArm) {
     message.textContent = "Stream wird gestartet …";
     api("POST", "/api/play", { game_id: id }).then(function (data) {
-      if (!data.httpOk) { message.textContent = data.message || "Start fehlgeschlagen"; return; }
+      if (!data.httpOk) {
+        message.textContent = data.message || "Start fehlgeschlagen";
+        // Game just went live but the stream isn't ready yet: try again on the next poll.
+        if (fromArm && RETRYABLE.indexOf(data.error) >= 0 && armedRetries < ARMED_MAX_RETRIES) {
+          armedRetries++;
+          armedId = id;
+          message.textContent += " – neuer Versuch in 30 s";
+        }
+        return;
+      }
       message.textContent = "";
       openPlayer(id);
     }).catch(function () { message.textContent = "Relay nicht erreichbar"; });

@@ -137,13 +137,70 @@ async def test_viewer_requests_keep_relay_alive(fake, client, http):
     await relay.stop()
 
 
-async def test_sequence_regression_restarts_buffer_with_discontinuity(fake, relay):
+async def test_sequence_regression_keeps_old_segments_and_marks_discontinuity(fake, relay):
     await relay.start(make_game(LIVE_ID))
     fake.media_seq = 5  # encoder restart: upstream numbering drops
     await until(lambda: ("1080", 8) in fake.segment_fetches)
     text = relay.playlist_text()
-    assert "#EXT-X-MEDIA-SEQUENCE:3\n#EXT-X-DISCONTINUITY-SEQUENCE:1\n" in text
+    assert text.startswith("#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:1\n#EXT-X-MEDIA-SEQUENCE:0\n")
+    assert "seg/2.ts\n#EXT-X-DISCONTINUITY\n#EXTINF:1.000,\nseg/3.ts" in text
+    assert relay.segment(0) == b"seg-1080-101"  # TVs still behind can finish the old segments
     assert relay.segment(3) == b"seg-1080-6"
+
+
+async def test_playlist_stays_available_during_regression_fetch(fake, relay):
+    await relay.start(make_game(LIVE_ID))
+    seen_none = []
+    original = relay._fetch
+
+    async def slow_fetch(url):
+        seen_none.append(relay.playlist_text() is None)
+        return await original(url)
+
+    relay._fetch = slow_fetch
+    fake.media_seq = 5
+    await until(lambda: ("1080", 8) in fake.segment_fetches)
+    assert seen_none and not any(seen_none)
+
+
+async def test_unreadable_playlist_counts_as_upstream_error(fake, client, http):
+    relay = HlsRelay(client, http, max_outage=0.0, **FAST)
+    await relay.start(make_game(LIVE_ID))
+    fake.rendition_body = "#EXTM3U\n#EXT-X-MEDIA-SEQUENCE:kaputt\n"
+    await until(lambda: relay.state == "error", timeout=5.0)
+    assert relay.error == "upstream"
+    await relay.stop()
+
+
+async def test_unexpected_error_on_start_does_not_wedge_the_game(fake, relay):
+    from relay.sporteurope_client import UpstreamError
+    fake.rendition_body = "#EXTM3U\n#EXT-X-TARGETDURATION:x\n"
+    with pytest.raises(UpstreamError):
+        await relay.start(make_game(LIVE_ID))
+    assert (relay.state, relay.error) == ("error", "upstream")
+
+
+async def test_unexpected_error_in_loop_stops_relay(fake, relay):
+    await relay.start(make_game(LIVE_ID))
+
+    async def boom():
+        raise RuntimeError("bug")
+
+    relay._poll_once = boom
+    await until(lambda: relay.state == "error")
+    assert relay.error == "upstream"
+
+
+async def test_stream_info_outage_keeps_polling_with_current_url(fake, client, http):
+    relay = HlsRelay(client, http, refresh_interval=0.05, max_outage=0.0, **FAST)
+    await relay.start(make_game(LIVE_ID))
+    fake.stream_status = 500
+    for _ in range(3):
+        fake.advance(1)
+        newest = fake.media_seq + fake.live_segments - 1
+        await until(lambda: ("1080", newest) in fake.segment_fetches)
+    assert relay.state == "live"
+    await relay.stop()
 
 
 async def test_switching_game_keeps_local_numbering(fake, relay):

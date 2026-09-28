@@ -67,6 +67,10 @@ class HlsRelay:
             except SporteuropeError as exc:
                 self._halt(exc.code)
                 raise
+            except Exception as exc:
+                log.exception("Unexpected error while starting the relay")
+                self._halt(UpstreamError.code)
+                raise UpstreamError(f"{type(exc).__name__} beim Start") from exc
             self.state = "live"
             log.info("Relay live: %s", game.name)
             self._task = asyncio.create_task(self._run())
@@ -131,9 +135,14 @@ class HlsRelay:
                     log.info("No viewer for %.0f s", self._idle_timeout)
                     self._halt(None)
                     return
-                try:
-                    if now - self._last_refresh >= self._refresh_interval:
+                if now - self._last_refresh >= self._refresh_interval:
+                    try:
                         await self._refresh()
+                    except UpstreamError as exc:
+                        # The current signed URL usually still works: keep feeding the TVs, retry soon.
+                        log.warning("Stream info refresh failed (%s), keeping the current URL", exc)
+                        self._last_refresh = now - self._refresh_interval + min(10.0, self._refresh_interval)
+                try:
                     await self._poll()
                 except UpstreamError as exc:
                     if outage_since is None:
@@ -151,6 +160,9 @@ class HlsRelay:
             self._halt(StreamInUse.code)
         except SporteuropeError as exc:
             self._halt(exc.code)
+        except Exception:
+            log.exception("Unexpected error in the relay loop")
+            self._halt(UpstreamError.code)
 
     async def _refresh(self) -> None:
         info = await self._client.stream_info(self.game.id)
@@ -162,7 +174,10 @@ class HlsRelay:
             raise StreamInUse("Mux verweigert die Master-Playlist") from exc
         if playlist.has_drm(master):
             raise DrmProtected("Schlüssel in der Master-Playlist")
-        variants = playlist.parse_master(master, info.master_url)
+        try:
+            variants = playlist.parse_master(master, info.master_url)
+        except ValueError as exc:
+            raise UpstreamError("unlesbare Master-Playlist") from exc
         if not variants:
             raise UpstreamError("Master-Playlist ohne Varianten")
         self._rendition_url = playlist.pick_variant(variants, self._max_height).uri
@@ -183,14 +198,17 @@ class HlsRelay:
         text = await self._fetch_text(self._rendition_url)
         if playlist.has_drm(text):
             raise DrmProtected("Schlüssel in der Rendition-Playlist")
-        media = playlist.parse_media(text, self._rendition_url)
+        try:
+            media = playlist.parse_media(text, self._rendition_url)
+        except ValueError as exc:
+            raise UpstreamError("unlesbare Rendition-Playlist") from exc
         self._target = max(1, media.target_duration)
         self._ended = media.ended
         if not media.segments:
             return
         if self._upstream_last is not None and media.segments[-1].seq < self._upstream_last:
-            log.warning("Upstream media sequence went backwards, restarting buffer")
-            self._buffer.reset()
+            log.warning("Upstream media sequence went backwards, continuing after a discontinuity")
+            self._buffer.mark_discontinuity()
             self._upstream_last = None
         last = self._upstream_last
         new = [s for s in media.segments if last is None or s.seq > last]

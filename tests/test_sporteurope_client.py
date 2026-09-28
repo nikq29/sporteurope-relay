@@ -67,3 +67,42 @@ async def test_stream_info_maps_refusals(fake, client, status, error):
     fake.stream_status = status
     with pytest.raises(error):
         await client.stream_info(LIVE_ID)
+
+
+async def test_concurrent_list_games_share_one_upstream_fetch(fake, client):
+    import asyncio
+    populate(fake)
+    fake.list_delay = 0.05
+    results = await asyncio.gather(*(client.list_games() for _ in range(3)))
+    assert all(len(r) == 4 for r in results)
+    assert fake.calls["list"] == 1
+    assert fake.calls["detail"] == 3
+
+
+async def test_failing_detail_marks_only_that_game_unknown(fake, client):
+    populate(fake)
+    fake.detail_status[LOCKED_ID] = 500
+    games = {g.id: g.unlocked for g in await client.list_games()}
+    assert games[LOCKED_ID] is None and games[UPCOMING_ID] is True
+    client.GAMES_TTL = 0
+    fake.detail_status.clear()
+    games = {g.id: g.unlocked for g in await client.list_games()}
+    assert games[LOCKED_ID] is False
+
+
+async def test_list_failure_serves_last_good_list(fake, client):
+    populate(fake)
+    first = await client.list_games()
+    client.GAMES_TTL = 0
+    fake.list_status = 500
+    assert await client.list_games() == first
+
+
+async def test_list_failure_without_cache_is_not_retried_immediately(fake, client):
+    from relay.sporteurope_client import UpstreamError
+    populate(fake)
+    fake.list_status = 500
+    for _ in range(3):
+        with pytest.raises(UpstreamError):
+            await client.list_games()
+    assert fake.calls["list"] == 1

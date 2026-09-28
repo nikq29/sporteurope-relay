@@ -1,6 +1,6 @@
 import pytest
 
-from relay.sporteurope_client import DrmProtected, LoginFailed
+from relay.sporteurope_client import DrmProtected, LoginFailed, NotPurchased
 from relay.web import create_app
 from stubs import StubClient, StubRelay, make_game
 
@@ -58,7 +58,6 @@ async def test_second_tv_joins_running_game_without_restart(tv, relay):
 
 
 @pytest.mark.parametrize("game_id,status,message", [
-    ("locked-1", 403, "🔒 Nicht gekauft"),
     ("soon-1", 409, "Spiel ist noch nicht live"),
     ("nope", 404, "Spiel nicht gefunden"),
 ])
@@ -103,3 +102,16 @@ async def test_live_playlist_and_segments(tv, relay):
     assert seg.status == 200 and await seg.read() == b"ts-bytes"
     assert seg.headers["Content-Type"] == "video/mp2t"
     assert (await tv.get("/seg/8.ts")).status == 404
+
+
+async def test_game_marked_locked_is_still_tried_because_it_may_have_been_bought_since(tv, relay):
+    resp = await tv.post("/api/play", json={"game_id": "locked-1"})
+    assert resp.status == 200
+    assert relay.started == ["locked-1"]
+
+
+async def test_really_unpurchased_game_reports_lock(tv, relay):
+    relay.fail = NotPurchased()
+    resp = await tv.post("/api/play", json={"game_id": "locked-1"})
+    assert resp.status == 403
+    assert (await resp.json())["message"] == "🔒 Nicht gekauft"
