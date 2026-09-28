@@ -1,0 +1,27 @@
+name: Sporteurope Relay
+version: "0.1.0"
+slug: sporteurope_relay
+description: Teilt einen Sporteurope-Livestream im Heimnetz auf mehrere Fernseher
+url: https://github.com/nikq29/sporteurope-relay
+arch:
+  - amd64
+  - aarch64
+init: false
+startup: application
+boot: auto
+homeassistant_api: true
+ports:
+  8099/tcp: 8099
+ports_description:
+  8099/tcp: TV-Seite und HLS-Stream (nur LAN)
+watchdog: "http://[HOST]:[PORT:8099]/api/status"
+options:
+  email: ""
+  password: ""
+  team_slug: ec-kassel-huskies
+  max_height: 1080
+schema:
+  email: email
+  password: password
+  team_slug: str
+  max_height: int(240,2160)
