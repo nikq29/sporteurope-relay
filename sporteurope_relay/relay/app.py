@@ -26,7 +26,7 @@ async def build_app(cfg: Config, *, base_url: str = API_BASE, ha_token: str | No
     client = SporteuropeClient(http, cfg.email, cfg.password, cfg.team_slug, base_url=base_url)
     relay = HlsRelay(client, http, max_height=cfg.max_height, **(relay_kwargs or {}))
     ha = HaStatus(http, ha_token, relay)
-    app = create_app(client, relay)
+    app = create_app(client, relay, remote_password=cfg.remote_password)
 
     tasks: list[asyncio.Task] = []
 

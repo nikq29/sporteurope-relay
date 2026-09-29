@@ -15,9 +15,12 @@ local network, like an HDMI splitter in software.
 ## Non-goals (explicit boundaries)
 
 - **No DRM circumvention.** If a stream carries DRM, the add-on refuses to relay it.
-- **No redistribution outside the household.** The stream is served on the LAN
-  only. It is never published to YouTube or any other platform, and never exposed
-  through the Cloudflared tunnel.
+- **No redistribution outside the household.** The stream is never published to
+  YouTube or any other platform. *Amended 2026-09-29 (user decision):* it may be
+  reached through the user's Cloudflared tunnel, but only behind the add-on's
+  `remote_password` (HTTP Basic auth, lockout after 10 failures); without a password
+  every tunnel request is refused, and the LAN stays password-free. Accepted risk:
+  Cloudflare's terms restrict video-heavy traffic on self-serve plans.
 - **No parallel sessions.** Different games on different TVs at the same time is
   not supported; that would defeat the concurrency limit rather than share one stream.
 - **No replays / VOD** (possible later extension).
@@ -34,7 +37,7 @@ The user accepts this risk.
 
 - Home Assistant OS 18.2, KVM VM (board `ova`), amd64, LAN IP `192.168.0.90`.
 - Supervisor available → runs as a custom Home Assistant add-on.
-- Cloudflared add-on is installed; the relay port must not be added to it.
+- Cloudflared add-on is installed; the relay may be routed through it only with `remote_password` set (see Non-goals).
 - Viewing devices: Fire TV, Android / Google TV (VLC), Samsung / LG smart TVs (browser).
 
 ## Sporteurope API (from a HAR capture, 2026-09-28)

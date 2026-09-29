@@ -1,0 +1,20 @@
+configuration:
+  email:
+    name: Sporteurope email
+    description: Email address of the Sporteurope account.
+  password:
+    name: Sporteurope password
+    description: Password of the Sporteurope account.
+  team_slug:
+    name: Team
+    description: Sporteurope team slug (default ec-kassel-huskies).
+  max_height:
+    name: Maximum resolution
+    description: Highest picture height in pixels, e.g. 1080 or 720.
+  remote_password:
+    name: Password for access via your domain
+    description: >-
+      Protects access through the Cloudflare tunnel (any user name).
+      Empty = no access from outside. No password is needed on the home network.
+network:
+  8099/tcp: TV page and HLS stream

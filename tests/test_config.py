@@ -20,3 +20,13 @@ def test_load_config_reads_overrides(tmp_path):
 
 def test_config_repr_hides_password():
     assert "geheim" not in repr(Config(email="a@b.de", password="geheim"))
+
+
+def test_remote_password_defaults_to_empty_and_is_hidden(tmp_path):
+    path = tmp_path / "options.json"
+    path.write_text(json.dumps({"email": "a@b.de", "password": "pw"}))
+    assert load_config(str(path)).remote_password == ""
+    path.write_text(json.dumps({"email": "a@b.de", "password": "pw", "remote_password": "tor-kassel"}))
+    cfg = load_config(str(path))
+    assert cfg.remote_password == "tor-kassel"
+    assert "tor-kassel" not in repr(cfg)
