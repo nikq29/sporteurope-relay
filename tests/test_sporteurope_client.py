@@ -106,3 +106,20 @@ async def test_list_failure_without_cache_is_not_retried_immediately(fake, clien
         with pytest.raises(UpstreamError):
             await client.list_games()
     assert fake.calls["list"] == 1
+
+
+async def test_team_profile_id_is_resolved_once(fake, client):
+    populate(fake)
+    client.GAMES_TTL = 0
+    for _ in range(3):
+        await client.list_games()
+    assert fake.calls["profile_slug"] == 1
+    assert fake.calls["list"] == 3
+
+
+async def test_unknown_team_slug_fails_clearly(fake, http):
+    from relay.sporteurope_client import UpstreamError
+    populate(fake)
+    other = SporteuropeClient(http, EMAIL, "richtig", "gibt-es-nicht", base_url=fake.base_url)
+    with pytest.raises(UpstreamError, match="gibt-es-nicht"):
+        await other.list_games()

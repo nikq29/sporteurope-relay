@@ -71,6 +71,7 @@ class SporteuropeClient:
         self._games_lock = asyncio.Lock()
         self._games_failure: tuple[float, UpstreamError] | None = None
         self._unlocked: dict[str, bool] = {}
+        self._team_profile_id: str | None = None
         self.owned_ids: set[str] = set()
         self.login_body: dict = {}
 
@@ -161,14 +162,30 @@ class SporteuropeClient:
     async def _fetch_games(self) -> list[Game]:
         if not self._logged_in:
             await self.login()
+        profile_id = await self._resolve_team_profile()
         items: list[dict] = []
         for page in range(1, self.MAX_PAGES + 1):
-            body = await self._request("GET", "/api/web/public/next-livestreams",
+            body = await self._request("GET", f"/api/web/public/profiles/{profile_id}/next-livestreams",
                                        params={"page": page, "per_page": self.PER_PAGE, "lang": "de"})
             items += body.get("data") or []
             if page >= int((body.get("meta") or {}).get("last_page", page)):
                 break
         return [await self._with_unlock(game) for game in parse_games(items, self._team_slug)]
+
+    async def _resolve_team_profile(self) -> str:
+        """The team page resolves its slug the same way; the id never changes, so ask once."""
+        if self._team_profile_id is None:
+            try:
+                body = await self._request("GET", f"/api/web/public/profile-slugs/{self._team_slug}", params={"lang": "de"})
+            except HttpStatusError as exc:
+                if exc.status == 404:
+                    raise UpstreamError(f"Team '{self._team_slug}' gibt es bei Sporteurope nicht") from exc
+                raise
+            if not body.get("profile_id"):
+                raise UpstreamError(f"Team '{self._team_slug}' ohne profile_id")
+            self._team_profile_id = body["profile_id"]
+            log.info("Team %s has profile id %s", self._team_slug, self._team_profile_id)
+        return self._team_profile_id
 
     async def _with_unlock(self, game: Game) -> Game:
         if game.id not in self._unlocked:

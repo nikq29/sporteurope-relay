@@ -14,6 +14,7 @@ UPCOMING_ID = "aaaaaaaa-0000-4000-8000-000000000002"
 LOCKED_ID = "aaaaaaaa-0000-4000-8000-000000000003"
 FREE_ID = "aaaaaaaa-0000-4000-8000-000000000004"
 OTHER_TEAM_ID = "aaaaaaaa-0000-4000-8000-000000000005"
+TEAM_PROFILE_ID = "9bc5fc83-4cc8-467c-b21e-2865759e41a1"
 
 
 def asset(asset_id, slug, *, live=False, home=TEAM, guest="eispiraten-crimmitschau", kind="LIVESTREAM",
@@ -53,7 +54,8 @@ class FakeSporteurope:
         app = web.Application()
         app.router.add_get("/api/web/personal/csrf", self._csrf)
         app.router.add_post("/api/web/auth/login", self._login)
-        app.router.add_get("/api/web/public/next-livestreams", self._list)
+        app.router.add_get("/api/web/public/profile-slugs/{slug}", self._profile_slug)
+        app.router.add_get("/api/web/public/profiles/{profile_id}/next-livestreams", self._list)
         app.router.add_get("/api/web/public/assets/{profile}/{slug}", self._detail)
         app.router.add_get("/api/web-player/personal/assets/{id}", self._stream_info)
         app.router.add_get("/mux/{id}.m3u8", self._master)
@@ -89,8 +91,16 @@ class FakeSporteurope:
         resp.set_cookie("session", f"s{self._session}")
         return resp
 
+    async def _profile_slug(self, request):
+        self.calls["profile_slug"] += 1
+        if request.match_info["slug"] != TEAM:
+            return web.json_response({"message": "Not found"}, status=404)
+        return web.json_response({"profile_id": TEAM_PROFILE_ID})
+
     async def _list(self, request):
         self.calls["list"] += 1
+        if request.match_info["profile_id"] != TEAM_PROFILE_ID:
+            return web.json_response({"message": "Not found"}, status=404)
         if self.list_delay:
             await asyncio.sleep(self.list_delay)
         if self.list_status != 200:

@@ -49,7 +49,9 @@ All calls go to `https://api.sporteurope.tv`, with headers `Origin` and
 |---|---|---|
 | CSRF cookie | `GET /api/web/personal/csrf?lang=de` | Sets `XSRF-TOKEN` cookie |
 | Login | `POST /api/web/auth/login?lang=de` body `{email, password}` | 201; cookie session; response includes `bought_products_and_asset_ids` |
-| Upcoming / live games | `GET /api/web/public/next-livestreams?page&per_page&lang` | Paginated |
+| Upcoming / live games | `GET /api/web/public/next-livestreams?page&per_page&lang` | Paginated, all of Sporteurope (~1000); **not used**, Kassel is not in the first pages |
+| Team profile id | `GET /api/web/public/profile-slugs/{team_slug}` | `{"profile_id": …}` (verified 2026-09-29) |
+| Team's upcoming games | `GET /api/web/public/profiles/{profile_id}/next-livestreams?page&per_page&lang` | All upcoming LIVESTREAMs of the team (46 for the season); **used by the relay** |
 | Personal feed | `GET /api/frontend/personal/feed?lang=de` | Contains team games incl. `monetizations`, `price_in_cents` |
 | Game by slug | `GET /api/web/public/assets/{profile_slug}/{asset_slug}?lang=de` | Resolves the asset `id` |
 | Stream info | `GET /api/web-player/personal/assets/{id}` | Headers `x-version`, `x-accept-language`. Returns `tracks[].sources[].hls` (signed Mux URL) and `mux.{playbackId, tokens.{playback, drm, …}}`. The web player polls this every **60 s** |
