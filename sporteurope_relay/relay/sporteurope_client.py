@@ -2,11 +2,13 @@
 import asyncio
 import json
 import logging
+import os
 import time
 from dataclasses import dataclass, replace
 from urllib.parse import unquote
 
 import aiohttp
+from yarl import URL
 
 from relay.games import Game, collect_ids, is_unlocked, parse_games
 from relay.logsafe import redact_text
@@ -65,7 +67,7 @@ class SporteuropeClient:
     MAX_PAGES = 10
 
     def __init__(self, http: aiohttp.ClientSession, email: str, password: str, team_slug: str, *,
-                 base_url: str = API_BASE):
+                 base_url: str = API_BASE, session_file: str | None = None):
         self._http = http
         self._email = email
         self._password = password
@@ -79,6 +81,8 @@ class SporteuropeClient:
         self._games_failure: tuple[float, UpstreamError] | None = None
         self._unlocked: dict[str, bool] = {}
         self._team_profile_id: str | None = None
+        self._session_file = session_file
+        self._session_restore_tried = False
         self.owned_ids: set[str] = set()
         self.login_body: dict = {}
 
@@ -133,6 +137,8 @@ class SporteuropeClient:
                 raise self._login_error
             if self._logged_in:
                 return
+            if self._restore_session():
+                return
             await self._request("GET", "/api/web/personal/csrf", params={"lang": "de"})
             try:
                 body = await self._request(
@@ -152,6 +158,46 @@ class SporteuropeClient:
             self._unlocked.clear()
             self._logged_in = True
             log.info("Logged in to Sporteurope (%d owned product/asset ids)", len(self.owned_ids))
+            self._save_session()
+
+    # Every fresh login counts as a new device at Sporteurope (auth.too_many_devices), so the session
+    # is kept in the add-on's private /data and reused across restarts and updates.
+
+    def _restore_session(self) -> bool:
+        if self._session_restore_tried or not self._session_file:
+            return False
+        self._session_restore_tried = True
+        try:
+            with open(self._session_file, encoding="utf-8") as f:
+                stored = json.load(f)
+            if stored.get("email") != self._email:
+                return False  # credentials changed in the add-on config
+            cookies, owned = dict(stored["cookies"]), list(stored["owned_ids"])
+        except FileNotFoundError:
+            return False
+        except (OSError, ValueError, KeyError, TypeError):
+            log.warning("Stored Sporteurope session is unreadable, logging in again")
+            return False
+        if not cookies:
+            return False
+        self._http.cookie_jar.update_cookies(cookies, response_url=URL(self._base))
+        self.owned_ids = set(owned)
+        self._logged_in = True
+        log.info("Reusing stored Sporteurope session (%d owned product/asset ids)", len(self.owned_ids))
+        return True
+
+    def _save_session(self) -> None:
+        if not self._session_file:
+            return
+        cookies = {c.key: c.value for c in self._http.cookie_jar.filter_cookies(URL(self._base)).values()}
+        tmp = self._session_file + ".tmp"
+        try:
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump({"email": self._email, "cookies": cookies, "owned_ids": sorted(self.owned_ids)}, f)
+            os.replace(tmp, self._session_file)
+        except OSError as exc:
+            log.warning("Could not store the Sporteurope session: %s", exc)
 
     async def _personal_get(self, path: str, headers: dict | None = None) -> dict:
         if not self._logged_in:

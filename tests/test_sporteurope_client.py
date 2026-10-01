@@ -135,3 +135,72 @@ async def test_login_conflict_reports_server_reason_and_is_retried_later(fake, c
     fake.login_status = None
     client.FAILURE_TTL = 0
     assert len(await client.list_games()) == 4  # not a credential error: next attempt may succeed
+
+
+async def fresh_client(fake, session_file):
+    """A new process after a restart: new cookie jar, same /data file."""
+    import aiohttp
+    http = aiohttp.ClientSession(cookie_jar=aiohttp.CookieJar(unsafe=True))
+    return http, SporteuropeClient(http, EMAIL, "richtig", TEAM, base_url=fake.base_url, session_file=session_file)
+
+
+async def test_session_survives_restart_without_new_login(fake, tmp_path):
+    populate(fake)
+    path = str(tmp_path / "session.json")
+    http1, first = await fresh_client(fake, path)
+    await first.stream_info(LIVE_ID)
+    await http1.close()
+    http2, second = await fresh_client(fake, path)
+    try:
+        games = await second.list_games()
+        await second.stream_info(LIVE_ID)
+    finally:
+        await http2.close()
+    assert fake.calls["login"] == 1, "a restart must not register a new device"
+    assert {g.id: g.unlocked for g in games}[LOCKED_ID] is False  # owned ids restored too
+
+
+async def test_expired_stored_session_logs_in_once_and_is_replaced(fake, tmp_path):
+    path = str(tmp_path / "session.json")
+    http1, first = await fresh_client(fake, path)
+    await first.stream_info(LIVE_ID)
+    await http1.close()
+    fake.session_expired = True
+    http2, second = await fresh_client(fake, path)
+    try:
+        await second.stream_info(LIVE_ID)
+    finally:
+        await http2.close()
+    assert fake.calls["login"] == 2
+    http3, third = await fresh_client(fake, path)
+    try:
+        await third.stream_info(LIVE_ID)
+    finally:
+        await http3.close()
+    assert fake.calls["login"] == 2
+
+
+async def test_unreadable_session_file_falls_back_to_login(fake, tmp_path):
+    path = tmp_path / "session.json"
+    path.write_text("kaputt")
+    http, c = await fresh_client(fake, str(path))
+    try:
+        await c.stream_info(LIVE_ID)
+    finally:
+        await http.close()
+    assert fake.calls["login"] == 1
+
+
+async def test_stored_session_of_another_account_is_not_reused(fake, tmp_path):
+    import aiohttp
+    path = str(tmp_path / "session.json")
+    http1, first = await fresh_client(fake, path)
+    await first.stream_info(LIVE_ID)
+    await http1.close()
+    http2 = aiohttp.ClientSession(cookie_jar=aiohttp.CookieJar(unsafe=True))
+    other = SporteuropeClient(http2, "andere@example.org", "x", TEAM, base_url=fake.base_url, session_file=path)
+    try:
+        with pytest.raises(LoginFailed):
+            await other.stream_info(LIVE_ID)
+    finally:
+        await http2.close()

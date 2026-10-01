@@ -15,15 +15,17 @@ from relay.sporteurope_client import API_BASE, SporteuropeClient
 from relay.web import create_app
 
 PORT = 8099
+SESSION_FILE = "/data/sporteurope_session.json"
 
 log = logging.getLogger(__name__)
 
 
 async def build_app(cfg: Config, *, base_url: str = API_BASE, ha_token: str | None = None,
-                    relay_kwargs: dict | None = None) -> web.Application:
+                    relay_kwargs: dict | None = None, session_file: str | None = None) -> web.Application:
     http = aiohttp.ClientSession(cookie_jar=aiohttp.CookieJar(unsafe=True),
                                  timeout=aiohttp.ClientTimeout(total=20))
-    client = SporteuropeClient(http, cfg.email, cfg.password, cfg.team_slug, base_url=base_url)
+    client = SporteuropeClient(http, cfg.email, cfg.password, cfg.team_slug, base_url=base_url,
+                               session_file=session_file)
     relay = HlsRelay(client, http, max_height=cfg.max_height, **(relay_kwargs or {}))
     ha = HaStatus(http, ha_token, relay, client=client)
     app = create_app(client, relay, remote_password=cfg.remote_password)
@@ -50,5 +52,6 @@ def main() -> None:
     setup_logging()
     cfg = load_config(os.environ.get("RELAY_OPTIONS", OPTIONS_PATH))
     log.info("Sporteurope Relay for team %s on port %d (max %dp)", cfg.team_slug, PORT, cfg.max_height)
-    web.run_app(build_app(cfg, ha_token=os.environ.get("SUPERVISOR_TOKEN")), port=PORT, access_log=None,
+    session_file = os.environ.get("RELAY_SESSION_FILE", SESSION_FILE)
+    web.run_app(build_app(cfg, ha_token=os.environ.get("SUPERVISOR_TOKEN"), session_file=session_file), port=PORT, access_log=None,
                 print=None)
