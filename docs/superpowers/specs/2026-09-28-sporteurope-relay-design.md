@@ -109,6 +109,15 @@ running switches the relay for every TV.
 
 ### Viewing endpoints
 
+*Added 2026-10-01 (user request):* **AirPlay and Chromecast, also through the domain.**
+Receivers fetch the stream themselves and cannot send the password, so logged-in viewers get
+a signed, expiring link (`/api/stream-url` → `live.m3u8?t=<expiry>.<hmac>`, 6 h, per-process
+secret). The token opens only `/live.m3u8` and `/seg/*`, never the API or the page; invalid
+tokens count toward the lockout. Stream responses send `Access-Control-Allow-Origin: *` for the
+Chromecast receiver. Safari plays natively (needed for AirPlay). Chromecast uses Google's Default
+Media Receiver; its sender SDK is loaded from gstatic.com only on `https` pages in Chrome — a
+deliberate exception to "no CDN dependency": the page and local playback work without it.
+
 - **Fire TV / Android TV:** VLC network stream `http://192.168.0.90:8099/live.m3u8`
   (always the active game).
 - **Samsung / LG:** browser bookmark `http://192.168.0.90:8099/`, remote-friendly

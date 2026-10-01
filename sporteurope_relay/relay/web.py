@@ -1,9 +1,11 @@
 """HTTP routes for the TVs: page, JSON API, relay playlist and segments."""
 import base64
 import binascii
+import hashlib
 import hmac
 import ipaddress
 import logging
+import os
 import time
 from pathlib import Path
 
@@ -29,6 +31,8 @@ _NO_CACHE = {"Cache-Control": "no-cache"}
 MAX_AUTH_FAILURES = 10
 AUTH_LOCKOUT_SECONDS = 600.0
 _REALM = 'Basic realm="Sporteurope Relay", charset="UTF-8"'
+STREAM_TOKEN_TTL = 6 * 3600
+_CORS = {"Access-Control-Allow-Origin": "*"}  # Chromecast's receiver page loads the stream cross-origin
 
 log = logging.getLogger(__name__)
 
@@ -55,7 +59,35 @@ def _basic_password(request: web.Request) -> str | None:
     return decoded.split(":", 1)[1] if ":" in decoded else None
 
 
-def _remote_auth_middleware(remote_password: str):
+class StreamTokens:
+    """Signed, expiring stream links for AirPlay/Chromecast receivers, which cannot send the password.
+
+    The secret lives only in this process, so a restart invalidates every link.
+    """
+
+    def __init__(self, ttl: int = STREAM_TOKEN_TTL):
+        self._secret = os.urandom(32)
+        self._ttl = ttl
+
+    def _sign(self, expires: str) -> str:
+        return hmac.new(self._secret, expires.encode(), hashlib.sha256).hexdigest()[:32]
+
+    def issue(self) -> str:
+        expires = str(int(time.time()) + self._ttl)
+        return f"{expires}.{self._sign(expires)}"
+
+    def valid(self, token: str) -> bool:
+        expires, _, signature = token.partition(".")
+        if not expires.isdigit() or not hmac.compare_digest(signature, self._sign(expires)):
+            return False
+        return time.time() < int(expires)
+
+
+def _is_stream_path(path: str) -> bool:
+    return path == "/live.m3u8" or path.startswith("/seg/")
+
+
+def _remote_auth_middleware(remote_password: str, tokens: StreamTokens):
     failures: dict[str, list[float]] = {}
 
     @web.middleware
@@ -70,6 +102,14 @@ def _remote_auth_middleware(remote_password: str):
         if len(recent) >= MAX_AUTH_FAILURES:
             failures[client] = recent
             return web.Response(status=429, text="Zu viele Fehlversuche, später erneut probieren\n")
+        token = request.query.get("t")
+        if token is not None and _is_stream_path(request.path):
+            if tokens.valid(token):
+                return await handler(request)
+            recent.append(now)
+            failures[client] = recent
+            log.warning("Invalid or expired stream link from %s", client)
+            return web.Response(status=401, text="Link ungültig oder abgelaufen\n")
         given = _basic_password(request)
         if given is not None and hmac.compare_digest(given.encode(), remote_password.encode()):
             failures.pop(client, None)
@@ -87,7 +127,10 @@ def _error(code: str) -> web.Response:
     return web.json_response({"error": code, "message": MESSAGES[code]}, status=_HTTP_STATUS[code])
 
 
-def create_app(client, relay, static_dir: Path = STATIC_DIR, *, remote_password: str = "") -> web.Application:
+def create_app(client, relay, static_dir: Path = STATIC_DIR, *, remote_password: str = "",
+               stream_token_ttl: int = STREAM_TOKEN_TTL) -> web.Application:
+    tokens = StreamTokens(stream_token_ttl)
+
     async def index(request):
         return web.FileResponse(static_dir / "index.html", headers=_NO_CACHE)
 
@@ -133,26 +176,36 @@ def create_app(client, relay, static_dir: Path = STATIC_DIR, *, remote_password:
         data["message"] = MESSAGES.get(data["error"]) if data["error"] else None
         return web.json_response(data, headers=_NO_CACHE)
 
+    async def stream_url(request):
+        """Link for receivers (AirPlay, Chromecast, VLC): the public URL the viewer used, plus a token."""
+        scheme = request.headers.get("X-Forwarded-Proto", request.scheme) if _from_tunnel(request) else request.scheme
+        url = f"{scheme}://{request.host}/live.m3u8?t={tokens.issue()}"
+        return web.json_response({"url": url, "expires_in": stream_token_ttl}, headers=_NO_CACHE)
+
     async def live(request):
         relay.touch(request.remote or "?")
         text = relay.playlist_text()
         if text is None:
-            return web.Response(status=503, text="Kein aktives Spiel\n", headers={"Retry-After": "2"})
-        return web.Response(text=text, content_type="application/vnd.apple.mpegurl", headers=_NO_CACHE)
+            return web.Response(status=503, text="Kein aktives Spiel\n", headers={"Retry-After": "2", **_CORS})
+        token = request.query.get("t")
+        if token:  # receivers resolve seg/ relative to the playlist and drop its query: carry the token along
+            text = "\n".join(f"{line}?t={token}" if line.startswith("seg/") else line for line in text.split("\n"))
+        return web.Response(text=text, content_type="application/vnd.apple.mpegurl", headers={**_NO_CACHE, **_CORS})
 
     async def segment(request):
         relay.touch(request.remote or "?")
         data = relay.segment(int(request.match_info["seq"]))
         if data is None:
             raise web.HTTPNotFound()
-        return web.Response(body=data, content_type="video/mp2t", headers={"Cache-Control": "max-age=300"})
+        return web.Response(body=data, content_type="video/mp2t", headers={"Cache-Control": "max-age=300", **_CORS})
 
-    app = web.Application(middlewares=[_remote_auth_middleware(remote_password)])
+    app = web.Application(middlewares=[_remote_auth_middleware(remote_password, tokens)])
     app.router.add_get("/", index)
     app.router.add_get("/api/games", games)
     app.router.add_post("/api/play", play)
     app.router.add_post("/api/stop", stop)
     app.router.add_get("/api/status", status)
+    app.router.add_get("/api/stream-url", stream_url)
     app.router.add_get("/live.m3u8", live)
     app.router.add_get(r"/seg/{seq:\d+}.ts", segment)
     app.router.add_static("/static/", static_dir)

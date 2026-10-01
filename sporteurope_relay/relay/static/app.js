@@ -21,8 +21,23 @@
   var RETRYABLE = ["upstream", "not_live", "not_purchased"]; // never retry drm / stream_in_use / login_failed
   var playingGameId = null;
   var statusTimer = null;
+  var streamUrl = null; // signed link: receivers (AirPlay, Chromecast, VLC) can't send the password
+  var castContext = null;
+  var APPLE = !!window.WebKitPlaybackTargetAvailabilityEvent; // Safari: play natively so AirPlay works
+  var airplayButton = document.getElementById("airplay-button");
+  var castButton = document.getElementById("cast-button");
+  var vlcUrl = document.getElementById("vlc-url");
 
-  document.getElementById("vlc-url").textContent = location.origin + "/live.m3u8";
+  vlcUrl.textContent = location.origin + "/live.m3u8";
+
+  function refreshStreamUrl() {
+    return api("GET", "/api/stream-url").then(function (data) {
+      if (data.url) {
+        streamUrl = data.url;
+        vlcUrl.textContent = streamUrl;
+      }
+    }).catch(function () {});
+  }
 
   function api(method, path, body) {
     return fetch(path, {
@@ -125,17 +140,19 @@
 
   function attach() {
     if (hls) { hls.destroy(); hls = null; }
-    if (window.Hls && window.Hls.isSupported()) {
+    if (APPLE && video.canPlayType("application/vnd.apple.mpegurl")) {
+      video.src = streamUrl || "/live.m3u8";
+    } else if (window.Hls && window.Hls.isSupported()) {
       hls = new window.Hls({ liveSyncDurationCount: 3, manifestLoadingMaxRetry: 10, manifestLoadingRetryDelay: 2000 });
       hls.on(window.Hls.Events.ERROR, function (event, data) {
         if (!data.fatal) return;
         if (data.type === window.Hls.ErrorTypes.MEDIA_ERROR) { hls.recoverMediaError(); return; }
         setTimeout(function () { if (!player.hidden) attach(); }, 3000);
       });
-      hls.loadSource("/live.m3u8");
+      hls.loadSource(streamUrl || "/live.m3u8");
       hls.attachMedia(video);
     } else {
-      video.src = "/live.m3u8";
+      video.src = streamUrl || "/live.m3u8";
     }
     var started = video.play();
     if (started && started.catch) started.catch(function () {});
@@ -146,7 +163,10 @@
     home.hidden = true;
     player.hidden = false;
     playerMessage.textContent = "";
-    attach();
+    refreshStreamUrl().then(function () {
+      attach();
+      if (castContext && castContext.getCurrentSession()) castCurrent();
+    });
     clearInterval(statusTimer);
     statusTimer = setInterval(checkStatus, STATUS_POLL_MS);
   }
@@ -202,6 +222,64 @@
     e.preventDefault();
   });
 
+  // --- AirPlay (Safari / iOS) ---
+  if (APPLE) {
+    video.addEventListener("webkitplaybacktargetavailabilitychanged", function (e) {
+      airplayButton.hidden = e.availability !== "available";
+    });
+    airplayButton.addEventListener("click", function () { video.webkitShowPlaybackTargetPicker(); });
+  }
+
+  // --- Chromecast (Chrome, only on https: Cast and the receiver need a secure stream URL) ---
+  function castCurrent() {
+    var session = castContext && castContext.getCurrentSession();
+    if (!session || !streamUrl || player.hidden) return;
+    var media = window.chrome.cast.media;
+    var info = new media.MediaInfo(streamUrl, "application/x-mpegurl");
+    info.streamType = media.StreamType.LIVE;
+    if (media.HlsSegmentFormat) info.hlsSegmentFormat = media.HlsSegmentFormat.TS;
+    if (media.HlsVideoSegmentFormat) info.hlsVideoSegmentFormat = media.HlsVideoSegmentFormat.MPEG2_TS;
+    info.metadata = new media.GenericMediaMetadata();
+    var game = games.filter(function (g) { return g.id === playingGameId; })[0];
+    info.metadata.title = game ? game.home + " – " + game.guest : "Huskies live";
+    var request = new media.LoadRequest(info);
+    request.autoplay = true;
+    session.loadMedia(request).then(function () {
+      video.pause();
+      playerMessage.textContent = "Läuft auf " + session.getCastDevice().friendlyName;
+    }, function () { playerMessage.textContent = "Chromecast konnte den Stream nicht starten"; });
+  }
+
+  window.__onGCastApiAvailable = function (available) {
+    if (!available) return;
+    var framework = window.cast.framework;
+    castContext = framework.CastContext.getInstance();
+    castContext.setOptions({
+      receiverApplicationId: window.chrome.cast.media.DEFAULT_MEDIA_RECEIVER_APP_ID,
+      autoJoinPolicy: window.chrome.cast.AutoJoinPolicy.ORIGIN_SCOPED
+    });
+    castButton.hidden = false;
+    castContext.addEventListener(framework.CastContextEventType.SESSION_STATE_CHANGED, function (e) {
+      var states = framework.SessionState;
+      if (e.sessionState === states.SESSION_STARTED || e.sessionState === states.SESSION_RESUMED) {
+        refreshStreamUrl().then(castCurrent);
+      } else if (e.sessionState === states.SESSION_ENDED) {
+        playerMessage.textContent = "";
+        if (!player.hidden) attach();
+      }
+    });
+  };
+
+  if (location.protocol === "https:" && window.chrome) {
+    var castScript = document.createElement("script");
+    castScript.src = "https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1";
+    document.head.appendChild(castScript);
+  }
+
+  document.getElementById("back-button").addEventListener("click", function () { closePlayer(); });
+
+  refreshStreamUrl();
+  setInterval(refreshStreamUrl, 60 * 60 * 1000); // links last 6 h; keep a fresh one around
   loadGames();
   setInterval(function () { if (player.hidden) loadGames(); }, GAMES_POLL_MS);
 })();

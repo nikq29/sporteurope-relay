@@ -12,9 +12,15 @@
   <p id="message" role="status"></p>
   <div id="games" class="grid"></div>
   <p class="hint">VLC / Fire TV: <span id="vlc-url"></span></p>
+  <p class="hint">Der Link enthält einen Zugangsschlüssel (6 Std. gültig) – nicht weitergeben.</p>
 </main>
 <section id="player" hidden>
-  <video id="video" autoplay playsinline></video>
+  <video id="video" autoplay playsinline controls x-webkit-airplay="allow"></video>
+  <div id="toolbar">
+    <google-cast-launcher id="cast-button" hidden></google-cast-launcher>
+    <button id="airplay-button" class="tool" hidden>AirPlay</button>
+    <button id="back-button" class="tool">Zurück</button>
+  </div>
   <p id="player-message" role="status"></p>
 </section>
 <script src="/static/hls.min.js"></script>

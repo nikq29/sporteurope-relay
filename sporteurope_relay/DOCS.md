@@ -15,6 +15,15 @@ Holt **einen** Sporteurope-Livestream und verteilt ihn im Heimnetz an mehrere Fe
 3. Browser: `https://huskies.deine-domain.de/` – Benutzername beliebig, dazu das Passwort.
    VLC: `https://huskies:PASSWORT@huskies.deine-domain.de/live.m3u8`
 
+## AirPlay und Chromecast
+- **AirPlay** (iPhone, iPad, Mac mit Safari): Spiel starten, dann AirPlay-Knopf oben rechts oder in der Wiedergabeleiste.
+  Funktioniert im Heimnetz und über die Domain.
+- **Chromecast** (Chrome am Laptop/Android): nur über die Domain (`https://…`), da Chromecast eine
+  verschlüsselte Verbindung verlangt. Spiel starten, dann Cast-Symbol oben rechts.
+- Empfänger bekommen einen Link mit Zugangsschlüssel (6 Std. gültig), weil sie kein Passwort eingeben
+  können. Der Link öffnet nur den Stream, nicht die Spielauswahl. Ein Neustart des Add-ons macht alle
+  Links ungültig.
+
 Ohne gesetztes Passwort lehnt das Add-on jede Anfrage über den Tunnel ab. Nach 10 Fehlversuchen
 wird die jeweilige Adresse für 10 Minuten gesperrt. Im Heimnetz ist kein Passwort nötig.
 
