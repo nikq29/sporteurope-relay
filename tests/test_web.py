@@ -115,3 +115,9 @@ async def test_really_unpurchased_game_reports_lock(tv, relay):
     resp = await tv.post("/api/play", json={"game_id": "locked-1"})
     assert resp.status == 403
     assert (await resp.json())["message"] == "🔒 Nicht gekauft"
+
+
+async def test_status_reports_end_of_game(tv, relay):
+    relay.state = "ended"
+    data = await (await tv.get("/api/status")).json()
+    assert data["message"] == "Spiel beendet"

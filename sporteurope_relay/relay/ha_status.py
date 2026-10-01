@@ -1,8 +1,12 @@
 """Mirrors the relay state into sensor.sporteurope_relay via the Supervisor's Core API proxy."""
 import asyncio
 import logging
+import time
 
 import aiohttp
+
+from relay.sporteurope_client import SporteuropeError
+from relay.web import status_message
 
 SENSOR_URL = "http://supervisor/core/api/states/sensor.sporteurope_relay"
 
@@ -10,9 +14,11 @@ log = logging.getLogger(__name__)
 
 
 class HaStatus:
-    def __init__(self, http: aiohttp.ClientSession | None, token: str | None, relay, *,
-                 url: str = SENSOR_URL, interval: float = 10.0):
+    def __init__(self, http: aiohttp.ClientSession | None, token: str | None, relay, *, client=None,
+                 url: str = SENSOR_URL, interval: float = 10.0, check_interval: float = 1800.0):
         self._http = http
+        self._client = client
+        self._check_interval = check_interval
         self._token = token
         self._relay = relay
         self._url = url
@@ -21,7 +27,9 @@ class HaStatus:
 
     def payload(self) -> dict:
         status = self._relay.status()
-        state = status["state"] if status["state"] in ("live", "error") else "idle"
+        if self._client is not None and self._client.login_failed and status["state"] != "live":
+            status = {**status, "state": "error", "error": "login_failed"}
+        state = status["state"] if status["state"] in ("live", "ended", "error") else "idle"
         game = status["game"]
         return {
             "state": state,
@@ -31,6 +39,7 @@ class HaStatus:
                 "game": game["name"] if game else None,
                 "viewers": status["viewers"],
                 "error": status["error"],
+                "message": status_message(status),
             },
         }
 
@@ -53,6 +62,18 @@ class HaStatus:
         return True
 
     async def run(self) -> None:
+        last_check: float | None = None
         while True:
-            await self.publish_once()
+            try:
+                now = time.monotonic()
+                if self._client is not None and (last_check is None or now - last_check >= self._check_interval):
+                    # Log in and load the games well before kickoff, so bad credentials show up early.
+                    last_check = now
+                    try:
+                        await self._client.list_games()
+                    except SporteuropeError as exc:
+                        log.warning("Background check failed: %s", exc)
+                await self.publish_once()
+            except Exception:
+                log.exception("Sensor update failed")
             await asyncio.sleep(self._interval)

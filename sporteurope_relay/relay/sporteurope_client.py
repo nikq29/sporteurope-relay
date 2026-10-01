@@ -75,6 +75,10 @@ class SporteuropeClient:
         self.owned_ids: set[str] = set()
         self.login_body: dict = {}
 
+    @property
+    def login_failed(self) -> bool:
+        return self._login_error is not None
+
     def _headers(self, extra: dict | None = None) -> dict:
         headers = {"Accept": "application/json", "Origin": WEB_ORIGIN, "Referer": WEB_ORIGIN + "/"}
         if extra:

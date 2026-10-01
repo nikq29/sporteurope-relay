@@ -186,6 +186,7 @@
     api("GET", "/api/status").then(function (s) {
       if (s.state === "error") { closePlayer(s.message); return; }
       if (s.state === "idle") { closePlayer("Stream beendet"); return; }
+      if (s.state === "ended") { playerMessage.textContent = s.message; return; } // play out the rest
       if (s.game && s.game.id !== playingGameId) { // another TV switched the game
         playingGameId = s.game.id;
         attach();
@@ -275,6 +276,8 @@
     castScript.src = "https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1";
     document.head.appendChild(castScript);
   }
+
+  video.addEventListener("ended", function () { if (!player.hidden) closePlayer("Spiel beendet"); });
 
   document.getElementById("back-button").addEventListener("click", function () { closePlayer(); });
 

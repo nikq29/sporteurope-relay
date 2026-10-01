@@ -12,9 +12,14 @@ class StubClient:
         self.error = error
 
     async def list_games(self):
+        self.calls = getattr(self, "calls", 0) + 1
         if self.error:
             raise self.error
         return self.games
+
+    @property
+    def login_failed(self):
+        return type(self.error).__name__ == "LoginFailed"
 
 
 class StubRelay:

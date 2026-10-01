@@ -39,6 +39,8 @@ class FakeSporteurope:
         self.stream_status = 200
         self.rendition_status = 200
         self.rendition_body = None
+        self.chunk_status: dict[tuple[str, int], int] = {}
+        self.ended = False
         self.list_status = 200
         self.detail_status: dict[str, int] = {}
         self.list_delay = 0.0
@@ -171,9 +173,13 @@ class FakeSporteurope:
             lines.append(self.rendition_key)
         for seq in range(self.media_seq, self.media_seq + self.live_segments):
             lines += ["#EXTINF:1.000,", f"/mux/chunk/{height}/{seq}.ts?signature=t{self._token}"]
+        if self.ended:
+            lines.append("#EXT-X-ENDLIST")
         return web.Response(text="\n".join(lines) + "\n")
 
     async def _chunk(self, request):
         key = (request.match_info["height"], int(request.match_info["seq"]))
         self.segment_fetches[key] += 1
+        if key in self.chunk_status:
+            return web.Response(status=self.chunk_status[key])
         return web.Response(body=f"seg-{key[0]}-{key[1]}".encode(), content_type="video/mp2t")

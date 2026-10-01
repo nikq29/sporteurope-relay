@@ -16,8 +16,17 @@ from relay.sporteurope_client import (WEB_ORIGIN, DrmProtected, NotPurchased, Sp
 log = logging.getLogger(__name__)
 
 
+SEGMENT_ATTEMPTS = 3  # a segment Mux keeps failing to deliver is skipped instead of stopping the relay
+
+
 class MuxForbidden(Exception):
     """Mux answered 401/403/410: the signed URL expired or access was revoked."""
+
+
+class MuxHttpError(UpstreamError):
+    def __init__(self, status: int, url: str):
+        super().__init__(f"HTTP {status} für {redact_url(url)}")
+        self.status = status
 
 
 class HlsRelay:
@@ -48,6 +57,7 @@ class HlsRelay:
         self.game = game
         self._buffer.reset()
         self._upstream_last: int | None = None
+        self._segment_failures: dict[int, int] = {}
         self._rendition_url: str | None = None
         self._target = 6
         self._ended = False
@@ -111,7 +121,7 @@ class HlsRelay:
         return len(self._viewers)
 
     def playlist_text(self) -> str | None:
-        if self.state != "live" or len(self._buffer) == 0:
+        if self.state not in ("live", "ended") or len(self._buffer) == 0:
             return None
         return playlist.render_media(self._buffer.window(self._window), self._target, ended=self._ended)
 
@@ -135,6 +145,8 @@ class HlsRelay:
                     log.info("No viewer for %.0f s", self._idle_timeout)
                     self._halt(None)
                     return
+                if self.state == "ended":
+                    continue  # nothing left upstream; keep serving the buffer until nobody watches
                 if now - self._last_refresh >= self._refresh_interval:
                     try:
                         await self._refresh()
@@ -155,6 +167,9 @@ class HlsRelay:
                     backoff = min(backoff * 2, 8.0)
                     continue
                 outage_since, backoff = None, 1.0
+                if self._ended:
+                    log.info("Upstream playlist ended: game over")
+                    self.state = "ended"
         except NotPurchased:
             # We were allowed to play a moment ago, so the slot was taken elsewhere.
             self._halt(StreamInUse.code)
@@ -215,7 +230,19 @@ class HlsRelay:
         if last is None:
             new = new[-self._initial_segments:]
         for seg in new:
-            data = await self._fetch(seg.uri)
+            try:
+                data = await self._fetch(seg.uri)
+            except MuxHttpError as exc:
+                attempts = self._segment_failures.get(seg.seq, 0) + 1
+                if exc.status != 404 and attempts < SEGMENT_ATTEMPTS:
+                    self._segment_failures[seg.seq] = attempts
+                    raise
+                log.warning("Skipping upstream segment %d (HTTP %s)", seg.seq, exc.status)
+                self._segment_failures.pop(seg.seq, None)
+                self._buffer.mark_discontinuity()
+                self._upstream_last = seg.seq
+                continue
+            self._segment_failures.pop(seg.seq, None)
             self._buffer.append(seg.duration, data, discontinuity=seg.discontinuity)
             self._upstream_last = seg.seq
 
@@ -225,7 +252,7 @@ class HlsRelay:
                 if resp.status in (401, 403, 410):
                     raise MuxForbidden(resp.status)
                 if resp.status >= 400:
-                    raise UpstreamError(f"HTTP {resp.status} für {redact_url(url)}")
+                    raise MuxHttpError(resp.status, url)
                 return await resp.read()
         except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
             raise UpstreamError(f"{type(exc).__name__} für {redact_url(url)}") from exc

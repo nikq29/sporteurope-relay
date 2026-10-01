@@ -23,6 +23,7 @@ MESSAGES = {
     "upstream": "Verbindung zu Sporteurope unterbrochen",
     "not_live": "Spiel ist noch nicht live",
     "unknown_game": "Spiel nicht gefunden",
+    "ended": "Spiel beendet",
 }
 _HTTP_STATUS = {"login_failed": 401, "not_purchased": 403, "drm": 403, "stream_in_use": 409, "not_live": 409,
                 "unknown_game": 404, "upstream": 502}
@@ -123,6 +124,12 @@ def _remote_auth_middleware(remote_password: str, tokens: StreamTokens):
     return middleware
 
 
+def status_message(status: dict) -> str | None:
+    if status["error"]:
+        return MESSAGES.get(status["error"])
+    return MESSAGES["ended"] if status["state"] == "ended" else None
+
+
 def _error(code: str) -> web.Response:
     return web.json_response({"error": code, "message": MESSAGES[code]}, status=_HTTP_STATUS[code])
 
@@ -173,7 +180,7 @@ def create_app(client, relay, static_dir: Path = STATIC_DIR, *, remote_password:
 
     async def status(request):
         data = relay.status()
-        data["message"] = MESSAGES.get(data["error"]) if data["error"] else None
+        data["message"] = status_message(data)
         return web.json_response(data, headers=_NO_CACHE)
 
     async def stream_url(request):

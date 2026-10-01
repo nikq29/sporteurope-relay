@@ -208,3 +208,49 @@ async def test_switching_game_keeps_local_numbering(fake, relay):
     await relay.start(make_game(LIVE_ID, name="Anderes Spiel"))
     text = relay.playlist_text()
     assert "#EXT-X-MEDIA-SEQUENCE:3\n#EXT-X-DISCONTINUITY-SEQUENCE:1\n" in text
+
+
+async def test_missing_segment_is_skipped_and_playback_continues(fake, relay):
+    await relay.start(make_game(LIVE_ID))
+    fake.chunk_status[("1080", 104)] = 404  # Mux lists it but never delivers it
+    fake.advance(2)
+    await until(lambda: ("1080", 105) in fake.segment_fetches)
+    await asyncio.sleep(0.1)
+    assert relay.state == "live"
+    assert fake.segment_fetches[("1080", 104)] == 1  # not retried
+    text = relay.playlist_text()
+    assert "seg/2.ts\n#EXT-X-DISCONTINUITY\n#EXTINF:1.000,\nseg/3.ts" in text
+    assert relay.segment(3) == b"seg-1080-105"
+
+
+async def test_persistently_failing_segment_is_skipped_after_retries(fake, client, http):
+    relay = HlsRelay(client, http, max_outage=60.0, **FAST)
+    await relay.start(make_game(LIVE_ID))
+    fake.chunk_status[("1080", 104)] = 500
+    fake.advance(2)
+    await until(lambda: ("1080", 105) in fake.segment_fetches, timeout=15.0)
+    assert relay.state == "live"
+    assert fake.segment_fetches[("1080", 104)] == 3
+    await relay.stop()
+
+
+async def test_end_of_game_keeps_serving_buffer_and_stops_upstream(fake, client, http):
+    relay = HlsRelay(client, http, idle_timeout=5.0, **FAST)
+    await relay.start(make_game(LIVE_ID))
+    fake.ended = True
+    await until(lambda: relay.state == "ended")
+    assert relay.status()["error"] is None
+    assert relay.playlist_text().endswith("#EXT-X-ENDLIST\n")  # TVs play the rest, then stop
+    polls = fake.calls["rendition"]
+    relay.touch("192.168.0.50")
+    await asyncio.sleep(0.2)
+    assert fake.calls["rendition"] == polls
+    await relay.stop()
+
+
+async def test_ended_relay_goes_idle_when_nobody_watches(fake, client, http):
+    relay = HlsRelay(client, http, idle_timeout=0.3, **FAST)
+    await relay.start(make_game(LIVE_ID))
+    fake.ended = True
+    await until(lambda: relay.state == "ended")
+    await until(lambda: relay.state == "idle")
