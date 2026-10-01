@@ -24,11 +24,15 @@ class HaStatus:
         self._url = url
         self._interval = interval
         self._last: dict | None = None
+        self._check_error: SporteuropeError | None = None
 
     def payload(self) -> dict:
         status = self._relay.status()
-        if self._client is not None and self._client.login_failed and status["state"] != "live":
-            status = {**status, "state": "error", "error": "login_failed"}
+        if status["state"] not in ("live", "error"):
+            if self._client is not None and self._client.login_failed:
+                status = {**status, "state": "error", "error": "login_failed"}
+            elif self._check_error is not None:
+                status = {**status, "state": "error", "error": self._check_error.code}
         state = status["state"] if status["state"] in ("live", "ended", "error") else "idle"
         game = status["game"]
         return {
@@ -71,8 +75,10 @@ class HaStatus:
                     last_check = now
                     try:
                         await self._client.list_games()
+                        self._check_error = None
                     except SporteuropeError as exc:
                         log.warning("Background check failed: %s", exc)
+                        self._check_error = exc
                 await self.publish_once()
             except Exception:
                 log.exception("Sensor update failed")

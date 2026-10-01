@@ -98,3 +98,19 @@ async def test_run_checks_login_periodically_and_survives_errors(aiohttp_server)
         task.cancel()
     assert posts, "kept publishing after an unexpected error"
     assert client.calls >= 3, "login/game check repeats"
+
+
+async def test_failed_background_check_shows_on_sensor(aiohttp_server):
+    import asyncio
+    from relay.sporteurope_client import LoginError
+    from stubs import StubClient
+    url, posts = await fake_ha(aiohttp_server)
+    client = StubClient(error=LoginError("HTTP 409: Maximale Anzahl an Geräten erreicht"))
+    async with aiohttp.ClientSession() as http:
+        ha = HaStatus(http, "tok", StubRelay(), client=client, url=url, interval=0.02, check_interval=10)
+        task = asyncio.create_task(ha.run())
+        await asyncio.sleep(0.1)
+        task.cancel()
+    state, attrs = posts[-1][1]["state"], posts[-1][1]["attributes"]
+    assert state == "error" and attrs["error"] == "login_error"
+    assert attrs["message"] == "Anmeldung bei Sporteurope nicht möglich – Details im Add-on-Log"

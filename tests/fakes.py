@@ -44,6 +44,8 @@ class FakeSporteurope:
         self.list_status = 200
         self.detail_status: dict[str, int] = {}
         self.list_delay = 0.0
+        self.login_status: int | None = None
+        self.login_message = ""
         self.drm_token = None
         self.rendition_key = ""
         self.mux_forbidden = 0
@@ -83,6 +85,8 @@ class FakeSporteurope:
         self.calls["login"] += 1
         if request.headers.get("x-xsrf-token") != "tok=":
             return web.json_response({"message": "CSRF token mismatch."}, status=419)
+        if self.login_status:
+            return web.json_response({"message": self.login_message}, status=self.login_status)
         if await request.json() != {"email": EMAIL, "password": PASSWORD}:
             return web.json_response({"message": "invalid"}, status=422)
         self._session += 1

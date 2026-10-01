@@ -1,5 +1,6 @@
 """Talks to api.sporteurope.tv the way the web player does: one login, same headers, same cadence."""
 import asyncio
+import json
 import logging
 import time
 from dataclasses import dataclass, replace
@@ -8,6 +9,7 @@ from urllib.parse import unquote
 import aiohttp
 
 from relay.games import Game, collect_ids, is_unlocked, parse_games
+from relay.logsafe import redact_text
 
 API_BASE = "https://api.sporteurope.tv"
 WEB_ORIGIN = "https://sporteurope.tv"
@@ -24,9 +26,14 @@ class UpstreamError(SporteuropeError):
 
 
 class HttpStatusError(UpstreamError):
-    def __init__(self, status: int, path: str):
-        super().__init__(f"HTTP {status} für {path}")
+    def __init__(self, status: int, path: str, detail: str = ""):
+        super().__init__(f"HTTP {status} für {path}" + (f": {detail}" if detail else ""))
         self.status = status
+
+
+class LoginError(UpstreamError):
+    """Login refused for a reason other than wrong credentials (e.g. HTTP 409); may succeed later."""
+    code = "login_error"
 
 
 class LoginFailed(SporteuropeError):
@@ -96,13 +103,27 @@ class SporteuropeClient:
             async with self._http.request(method, self._base + path, params=params, json=json,
                                           headers=self._headers(headers)) as resp:
                 if resp.status >= 400:
-                    raise HttpStatusError(resp.status, path)
+                    raise HttpStatusError(resp.status, path, await self._error_detail(resp))
                 if resp.status == 204:
                     return {}
                 body = await resp.json(content_type=None)
                 return body if isinstance(body, dict) else {}
         except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as exc:
             raise UpstreamError(f"{type(exc).__name__} für {path}") from exc
+
+    @staticmethod
+    async def _error_detail(resp: aiohttp.ClientResponse) -> str:
+        """Sporteurope explains refusals in the body ({"message": ...}); keep it short and token-free."""
+        try:
+            text = await resp.text()
+        except (aiohttp.ClientError, UnicodeDecodeError):
+            return ""
+        try:
+            body = json.loads(text)
+        except ValueError:
+            body = text
+        detail = (body.get("message") or body.get("error") or "") if isinstance(body, dict) else body
+        return redact_text(str(detail).strip())[:200]
 
     async def login(self) -> None:
         if self._login_error:
@@ -124,7 +145,8 @@ class SporteuropeClient:
                     log.error("Sporteurope login rejected (HTTP %s); not retrying until the add-on restarts", exc.status)
                     self._login_error = LoginFailed("Zugangsdaten abgelehnt")
                     raise self._login_error from exc
-                raise
+                log.error("Sporteurope login failed: %s", exc)
+                raise LoginError(str(exc)) from exc
             self.login_body = body
             self.owned_ids = collect_ids(body.get("bought_products_and_asset_ids"))
             self._unlocked.clear()

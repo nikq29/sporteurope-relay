@@ -123,3 +123,15 @@ async def test_unknown_team_slug_fails_clearly(fake, http):
     other = SporteuropeClient(http, EMAIL, "richtig", "gibt-es-nicht", base_url=fake.base_url)
     with pytest.raises(UpstreamError, match="gibt-es-nicht"):
         await other.list_games()
+
+
+async def test_login_conflict_reports_server_reason_and_is_retried_later(fake, client):
+    from relay.sporteurope_client import LoginError
+    populate(fake)
+    fake.login_status, fake.login_message = 409, "Maximale Anzahl an Geräten erreicht"
+    with pytest.raises(LoginError, match="Maximale Anzahl an Geräten erreicht") as info:
+        await client.list_games()
+    assert info.value.code == "login_error"
+    fake.login_status = None
+    client.FAILURE_TTL = 0
+    assert len(await client.list_games()) == 4  # not a credential error: next attempt may succeed

@@ -24,8 +24,9 @@ MESSAGES = {
     "not_live": "Spiel ist noch nicht live",
     "unknown_game": "Spiel nicht gefunden",
     "ended": "Spiel beendet",
+    "login_error": "Anmeldung bei Sporteurope nicht möglich – Details im Add-on-Log",
 }
-_HTTP_STATUS = {"login_failed": 401, "not_purchased": 403, "drm": 403, "stream_in_use": 409, "not_live": 409,
+_HTTP_STATUS = {"login_error": 502, "login_failed": 401, "not_purchased": 403, "drm": 403, "stream_in_use": 409, "not_live": 409,
                 "unknown_game": 404, "upstream": 502}
 _NO_CACHE = {"Cache-Control": "no-cache"}
 
