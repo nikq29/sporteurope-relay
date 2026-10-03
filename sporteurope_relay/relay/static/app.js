@@ -24,7 +24,11 @@
   var streamUrl = null; // signed link: receivers (AirPlay, Chromecast, VLC) can't send the password
   var castContext = null;
   var APPLE = !!window.WebKitPlaybackTargetAvailabilityEvent; // Safari: play natively so AirPlay works
+  // Android Chrome casts only natively played video (Remote Playback API); hls.js/MediaSource can't be cast.
+  var ANDROID = /Android/i.test(navigator.userAgent);
+  var NATIVE = (APPLE || ANDROID) && !!video.canPlayType("application/vnd.apple.mpegurl");
   var airplayButton = document.getElementById("airplay-button");
+  var remoteButton = document.getElementById("remote-button");
   var castButton = document.getElementById("cast-button");
   var vlcUrl = document.getElementById("vlc-url");
 
@@ -140,8 +144,9 @@
 
   function attach() {
     if (hls) { hls.destroy(); hls = null; }
-    if (APPLE && video.canPlayType("application/vnd.apple.mpegurl")) {
+    if (NATIVE) {
       video.src = streamUrl || "/live.m3u8";
+      watchRemotePlayback();
     } else if (window.Hls && window.Hls.isSupported()) {
       hls = new window.Hls({ liveSyncDurationCount: 3, manifestLoadingMaxRetry: 10, manifestLoadingRetryDelay: 2000 });
       hls.on(window.Hls.Events.ERROR, function (event, data) {
@@ -222,6 +227,24 @@
     else return;
     e.preventDefault();
   });
+
+  // --- Android: Chromecast via the browser's own cast picker (Remote Playback API) ---
+  var remoteWatched = false;
+  function watchRemotePlayback() {
+    if (APPLE || remoteWatched || !video.remote || !video.remote.watchAvailability) return;
+    remoteWatched = true;
+    video.remote.watchAvailability(function (available) { remoteButton.hidden = !available; })
+      .catch(function () { remoteButton.hidden = false; }); // availability unknown: let the picker decide
+  }
+  remoteButton.addEventListener("click", function () {
+    video.remote.prompt().catch(function (err) {
+      if (err && err.name !== "AbortError") playerMessage.textContent = "Kein Cast-Gerät gefunden";
+    });
+  });
+  if (video.remote) {
+    video.remote.addEventListener("connect", function () { playerMessage.textContent = "Läuft auf dem Fernseher"; });
+    video.remote.addEventListener("disconnect", function () { playerMessage.textContent = ""; });
+  }
 
   // --- AirPlay (Safari / iOS) ---
   if (APPLE) {
