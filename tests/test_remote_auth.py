@@ -78,3 +78,13 @@ async def test_repeated_wrong_passwords_lock_out_that_client(aiohttp_client, sta
     other = {**TUNNEL, "Cf-Connecting-Ip": "198.51.100.9"}
     assert (await tv.get("/", headers={**other, **basic("geheim")})).status == 200
     assert (await tv.get("/")).status == 200  # home LAN unaffected
+
+
+async def test_tunnel_viewers_are_counted_per_real_client(aiohttp_client, static_dir):
+    relay = StubRelay()
+    relay.text = "#EXTM3U\n"
+    tv = await aiohttp_client(create_app(StubClient(), relay, static_dir, remote_password="geheim"))
+    for ip in ("203.0.113.7", "198.51.100.9"):
+        headers = {**TUNNEL, "Cf-Connecting-Ip": ip, **basic("geheim")}
+        assert (await tv.get("/live.m3u8", headers=headers)).status == 200
+    assert relay.touched == ["203.0.113.7", "198.51.100.9"]  # not the tunnel's internal address twice

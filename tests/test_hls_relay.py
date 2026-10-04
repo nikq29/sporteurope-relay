@@ -254,3 +254,43 @@ async def test_ended_relay_goes_idle_when_nobody_watches(fake, client, http):
     fake.ended = True
     await until(lambda: relay.state == "ended")
     await until(lambda: relay.state == "idle")
+
+
+async def test_stream_end_logs_viewer_summary(fake, client, http, caplog):
+    import logging
+    caplog.set_level(logging.INFO, logger="relay.hls_relay")
+    relay = HlsRelay(client, http, idle_timeout=5.0, **FAST)
+    await relay.start(make_game(LIVE_ID, name="Bietigheim Steelers vs. EC Kassel Huskies"))
+    relay.touch("192.168.0.50")
+    relay.touch("192.168.0.51")
+    assert relay.segment(0) == b"seg-1080-101"
+    relay.segment(1)
+    relay.touch("203.0.113.7")
+    await relay.stop()
+    summary = [r.getMessage() for r in caplog.records if r.getMessage().startswith("Stream beendet")]
+    assert len(summary) == 1
+    line = summary[0]
+    assert "Bietigheim Steelers vs. EC Kassel Huskies" in line
+    assert "max. 3 gleichzeitig" in line and "3 Geräte insgesamt" in line
+    assert "24 B ausgeliefert" in line  # two segments of 12 bytes from the fake
+    assert "192.168" not in line and "203.0.113" not in line  # counts only, no addresses
+
+
+async def test_viewer_count_changes_are_logged(fake, relay, caplog):
+    import logging
+    caplog.set_level(logging.INFO, logger="relay.hls_relay")
+    await relay.start(make_game(LIVE_ID))
+    relay.touch("192.168.0.50")
+    relay.touch("192.168.0.50")
+    relay.touch("192.168.0.51")
+    changes = [r.getMessage() for r in caplog.records if r.getMessage().startswith("Zuschauer:")]
+    assert changes == ["Zuschauer: 1", "Zuschauer: 2"]
+
+
+async def test_idle_stop_also_logs_summary(fake, client, http, caplog):
+    import logging
+    caplog.set_level(logging.INFO, logger="relay.hls_relay")
+    relay = HlsRelay(client, http, idle_timeout=0.2, **FAST)
+    await relay.start(make_game(LIVE_ID))
+    await until(lambda: relay.state == "idle")
+    assert any(r.getMessage().startswith("Stream beendet") for r in caplog.records)

@@ -51,6 +51,13 @@ def _from_tunnel(request: web.Request) -> bool:
     return not (address.is_private or address.is_loopback)
 
 
+def _client_id(request: web.Request) -> str:
+    """Viewer identity: through the tunnel every request comes from cloudflared, so use Cloudflare's header."""
+    if _from_tunnel(request) and request.headers.get("Cf-Connecting-Ip"):
+        return request.headers["Cf-Connecting-Ip"]
+    return request.remote or "?"
+
+
 def _basic_password(request: web.Request) -> str | None:
     header = request.headers.get("Authorization", "")
     if not header.lower().startswith("basic "):
@@ -194,7 +201,7 @@ def create_app(client, relay, static_dir: Path = STATIC_DIR, *, remote_password:
         return web.json_response({"url": url, "expires_in": stream_token_ttl}, headers=_NO_CACHE)
 
     async def live(request):
-        relay.touch(request.remote or "?")
+        relay.touch(_client_id(request))
         text = relay.playlist_text()
         if text is None:
             return web.Response(status=503, text="Kein aktives Spiel\n", headers={"Retry-After": "2", **_CORS})
@@ -204,7 +211,7 @@ def create_app(client, relay, static_dir: Path = STATIC_DIR, *, remote_password:
         return web.Response(text=text, content_type="application/vnd.apple.mpegurl", headers={**_NO_CACHE, **_CORS})
 
     async def segment(request):
-        relay.touch(request.remote or "?")
+        relay.touch(_client_id(request))
         data = relay.segment(int(request.match_info["seq"]))
         if data is None:
             raise web.HTTPNotFound()

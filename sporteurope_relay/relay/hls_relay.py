@@ -19,6 +19,21 @@ log = logging.getLogger(__name__)
 SEGMENT_ATTEMPTS = 3  # a segment Mux keeps failing to deliver is skipped instead of stopping the relay
 
 
+def _format_duration(seconds: float) -> str:
+    minutes, secs = divmod(int(seconds), 60)
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours}:{minutes:02d} h" if hours else f"{minutes}:{secs:02d} min"
+
+
+def _format_bytes(count: int) -> str:
+    size = float(count)
+    for unit in ("B", "KB", "MB"):
+        if size < 1000:
+            return f"{size:.0f} {unit}" if unit == "B" else f"{size:.1f} {unit}"
+        size /= 1000
+    return f"{size:.1f} GB"
+
+
 class MuxForbidden(Exception):
     """Mux answered 401/403/410: the signed URL expired or access was revoked."""
 
@@ -51,6 +66,8 @@ class HlsRelay:
         self.error: str | None = None
         self.game: Game | None = None
         self._viewers: dict[str, float] = {}
+        self._reported_viewers = 0
+        self._stats: dict | None = None  # per stream: start time, devices, peak, bytes served
         self._reset(None)
 
     def _reset(self, game: Game | None) -> None:
@@ -82,6 +99,7 @@ class HlsRelay:
                 self._halt(UpstreamError.code)
                 raise UpstreamError(f"{type(exc).__name__} beim Start") from exc
             self.state = "live"
+            self._stats = {"name": game.name, "started": time.monotonic(), "devices": set(), "peak": 0, "bytes": 0}
             log.info("Relay live: %s", game.name)
             self._task = asyncio.create_task(self._run())
 
@@ -102,6 +120,7 @@ class HlsRelay:
             log.warning("Relay stopped: %s", error)
         elif self.game:
             log.info("Relay stopped, upstream released")
+        self._log_summary()
         self.state = "error" if error else "idle"
         self.error = error
         if error is None:
@@ -114,11 +133,29 @@ class HlsRelay:
         now = time.monotonic()
         self._last_access = now
         self._viewers[client_ip] = now
+        if self._stats is not None:
+            self._stats["devices"].add(client_ip)
+        self.viewers()
 
     def viewers(self) -> int:
         now = time.monotonic()
         self._viewers = {ip: t for ip, t in self._viewers.items() if now - t <= self._viewer_ttl}
-        return len(self._viewers)
+        count = len(self._viewers)
+        if self._stats is not None:
+            self._stats["peak"] = max(self._stats["peak"], count)
+            if count != self._reported_viewers:
+                log.info("Zuschauer: %d", count)
+        self._reported_viewers = count
+        return count
+
+    def _log_summary(self) -> None:
+        stats, self._stats = self._stats, None
+        if stats is None:
+            return
+        devices = len(stats["devices"])
+        log.info("Stream beendet: %s – Dauer %s, Zuschauer max. %d gleichzeitig, %d %s insgesamt, %s ausgeliefert",
+                 stats["name"], _format_duration(time.monotonic() - stats["started"]), stats["peak"], devices,
+                 "Gerät" if devices == 1 else "Geräte", _format_bytes(stats["bytes"]))
 
     def playlist_text(self) -> str | None:
         if self.state not in ("live", "ended") or len(self._buffer) == 0:
@@ -126,7 +163,10 @@ class HlsRelay:
         return playlist.render_media(self._buffer.window(self._window), self._target, ended=self._ended)
 
     def segment(self, seq: int) -> bytes | None:
-        return self._buffer.get(seq)
+        data = self._buffer.get(seq)
+        if data is not None and self._stats is not None:
+            self._stats["bytes"] += len(data)
+        return data
 
     def status(self) -> dict:
         return {"state": self.state, "game": self.game.to_json() if self.game else None,

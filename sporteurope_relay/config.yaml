@@ -1,5 +1,5 @@
 name: Sporteurope Relay
-version: "0.5.1"
+version: "0.5.2"
 slug: sporteurope_relay
 description: Teilt einen Sporteurope-Livestream im Heimnetz auf mehrere Fernseher
 url: https://github.com/nikq29/sporteurope-relay
