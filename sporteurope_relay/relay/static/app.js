@@ -265,7 +265,7 @@
     if (media.HlsVideoSegmentFormat) info.hlsVideoSegmentFormat = media.HlsVideoSegmentFormat.MPEG2_TS;
     info.metadata = new media.GenericMediaMetadata();
     var game = games.filter(function (g) { return g.id === playingGameId; })[0];
-    info.metadata.title = game ? game.home + " – " + game.guest : "Huskies live";
+    info.metadata.title = game ? game.home + " – " + game.guest : document.title;
     var request = new media.LoadRequest(info);
     request.autoplay = true;
     session.loadMedia(request).then(function () {

@@ -3,6 +3,7 @@ import base64
 import binascii
 import hashlib
 import hmac
+import html
 import ipaddress
 import logging
 import os
@@ -136,11 +137,13 @@ def _error(code: str) -> web.Response:
 
 
 def create_app(client, relay, static_dir: Path = STATIC_DIR, *, remote_password: str = "",
-               stream_token_ttl: int = STREAM_TOKEN_TTL) -> web.Application:
+               stream_token_ttl: int = STREAM_TOKEN_TTL, title: str = "Huskies live") -> web.Application:
     tokens = StreamTokens(stream_token_ttl)
 
     async def index(request):
-        return web.FileResponse(static_dir / "index.html", headers=_NO_CACHE)
+        page = (static_dir / "index.html").read_text(encoding="utf-8")
+        page = page.replace("%TITLE%", html.escape(title, quote=True))
+        return web.Response(text=page, content_type="text/html", headers=_NO_CACHE)
 
     async def games(request):
         try:

@@ -16,5 +16,8 @@ configuration:
     description: >-
       Schützt den Zugriff über den Cloudflare-Tunnel (Benutzername beliebig).
       Leer = Zugriff von außen gesperrt. Im Heimnetz ist kein Passwort nötig.
+  title:
+    name: Seitentitel
+    description: Überschrift der TV-Seite und Name im Browser-Tab.
 network:
   8099/tcp: TV-Seite und HLS-Stream

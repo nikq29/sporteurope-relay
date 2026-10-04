@@ -16,5 +16,8 @@ configuration:
     description: >-
       Protects access through the Cloudflare tunnel (any user name).
       Empty = no access from outside. No password is needed on the home network.
+  title:
+    name: Page title
+    description: Heading of the TV page and name in the browser tab.
 network:
   8099/tcp: TV page and HLS stream

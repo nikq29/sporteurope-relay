@@ -12,6 +12,7 @@ class Config:
     team_slug: str = "ec-kassel-huskies"
     max_height: int = 1080
     remote_password: str = field(default="", repr=False)
+    title: str = "Huskies live"
 
 
 def load_config(path: str = OPTIONS_PATH) -> Config:
@@ -23,4 +24,5 @@ def load_config(path: str = OPTIONS_PATH) -> Config:
         team_slug=raw.get("team_slug") or "ec-kassel-huskies",
         max_height=int(raw.get("max_height") or 1080),
         remote_password=raw.get("remote_password") or "",
+        title=raw.get("title") or "Huskies live",
     )
