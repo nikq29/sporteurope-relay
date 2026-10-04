@@ -300,7 +300,16 @@
     document.head.appendChild(castScript);
   }
 
-  video.addEventListener("ended", function () { if (!player.hidden) closePlayer("Spiel beendet"); });
+  // Live players sometimes fire "ended" when they briefly run out of video. Only the relay knows
+  // whether the game is really over: reconnect while it is still live.
+  video.addEventListener("ended", function () {
+    if (player.hidden) return;
+    api("GET", "/api/status").then(function (s) {
+      if (player.hidden) return;
+      if (s.state === "live") { attach(); return; }
+      closePlayer(s.state === "ended" ? "Spiel beendet" : "Stream beendet");
+    }).catch(function () { if (!player.hidden) attach(); });
+  });
 
   document.getElementById("back-button").addEventListener("click", function () { closePlayer(); });
 
