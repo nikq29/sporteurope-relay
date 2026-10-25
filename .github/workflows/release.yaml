@@ -5,6 +5,7 @@ name: Release
 # installed one. This workflow bumps it and publishes a GitHub release.
 
 on:
+  workflow_dispatch:
   push:
     branches: [main]
     paths:
