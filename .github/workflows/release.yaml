@@ -1,0 +1,80 @@
+name: Release
+
+# Home Assistant builds the add-on from this repo and offers an update as soon
+# as `version` in sporteurope_relay/config.yaml on main is higher than the
+# installed one. This workflow bumps it and publishes a GitHub release.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - sporteurope_relay/**
+      - '!sporteurope_relay/DOCS.md'
+      - '!sporteurope_relay/translations/**'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - run: pip install -r requirements-dev.txt
+      - run: pytest
+
+      - name: Bump version
+        id: bump
+        run: |
+          set -euo pipefail
+          config=sporteurope_relay/config.yaml
+          current=$(sed -n 's/^version: "\(.*\)"/\1/p' "$config")
+          last_tag=$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null || true)
+
+          if [ -z "$last_tag" ]; then
+            # first run: release the version already in config.yaml
+            next=$current
+          else
+            log=$(git log "$last_tag"..HEAD --format='%s%n%b')
+            IFS=. read -r major minor patch <<< "$current"
+            if grep -qE '^[a-z]+(\(.+\))?!:|^BREAKING CHANGE' <<< "$log"; then
+              major=$((major + 1)); minor=0; patch=0
+            elif grep -qE '^feat(\(.+\))?:' <<< "$log"; then
+              minor=$((minor + 1)); patch=0
+            else
+              patch=$((patch + 1))
+            fi
+            next=$major.$minor.$patch
+          fi
+
+          sed -i "s/^version: \".*\"/version: \"$next\"/" "$config"
+          echo "version=$next" >> "$GITHUB_OUTPUT"
+
+      - name: Commit, tag and release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          v=v${{ steps.bump.outputs.version }}
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if ! git diff --quiet; then
+            git commit -am "chore: release $v"
+            git push
+          fi
+          git tag "$v"
+          git push origin "$v"
+          gh release create "$v" --title "$v" --generate-notes
